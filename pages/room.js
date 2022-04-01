@@ -1,9 +1,20 @@
-const { connect, createLocalVideoTrack } = require('twilio-video');
+//@ts-check
+const { connect } = require('twilio-video');
 import React, { useState, useEffect, useRef } from 'react';
 
 export default function Index({ token, roomName, userName }) {
     const [connectStatus, setConnectStatus] = useState('disconnected');
     const [room, setRoom] = useState(undefined);
+    const [participants, setParticipants] = useState([]);
+
+    const participantConnected = participant => {
+        setParticipants(prevParticipants => [...prevParticipants, participant]);
+    };
+    const participantDisconnected = participant => {
+        setParticipants(prevParticipants =>
+            prevParticipants.filter(p => p !== participant)
+        );
+    };
 
     const initiateConnect = async () => {
         setConnectStatus('connecting');
@@ -11,6 +22,9 @@ export default function Index({ token, roomName, userName }) {
         if (room) {
             setRoom(room);
             setConnectStatus('connected');
+            room.on('participantConnected', participantConnected);
+            room.on('participantDisconnected', participantDisconnected);
+            room.participants.forEach(participantConnected);
         }
     }
 
@@ -19,14 +33,42 @@ export default function Index({ token, roomName, userName }) {
         setConnectStatus('disconnected');
     }
 
+    let remoteVideoTrackPublications = [];
+    if (room) {
+        room.participants.forEach(participant => {
+            participant.videoTracks.forEach(track => {
+                if (track.kind === "video") {
+                    remoteVideoTrackPublications.push(track);
+                }
+            });
+        })
+    }
+    const participantNames = participants.map(p => p.identity);
+
+    const remoteParticipants = participants.map(participant => (
+        <Participant key={participant.sid} participant={participant} />
+    ));
+
     return <div>
         <div>room: {roomName}</div>
         <div>user: {userName}</div>
         <div>state: {connectStatus}</div>
+        <div>participants: {participantNames.join(', ')}</div>
         <button onClick={initiateConnect}>connect</button>
         <button onClick={killConnection}>disconnect</button>
-        <LocalMedia />
-        <RemoteMedia />
+        <div className="local-participant">
+            {room ? (
+                <Participant
+                    key={room.localParticipant.sid}
+                    participant={room.localParticipant}
+                />
+            ) : (
+                ''
+            )}
+        </div>
+
+        <h3>Remote Participants</h3>
+        <div className="remote-participants">{remoteParticipants}</div>
     </div>;
 }
 
@@ -39,11 +81,6 @@ const connectToTwilio = (token, roomName) => {
 
         const localParticipant = room.localParticipant;
         console.log(`Connected to the Room as LocalParticipant "${localParticipant.identity}"`);
-
-        // Log any Participants already connected to the Room
-        room.participants.forEach(participant => {
-            console.log(`Participant "${participant.identity}" is connected to the Room`);
-        });
 
         // Log new Participants as they connect to the Room
         room.on('participantConnected', participant => {
@@ -79,24 +116,62 @@ const reqProtocol = (req) => {
     return req["protocol"] || "https";
 };
 
-function LocalMedia() {
-    const ref = useRef(null);
+const Participant = ({ participant }) => {
+    const [videoTracks, setVideoTracks] = useState([]);
+    const [audioTracks, setAudioTracks] = useState([]);
+
+    const videoRef = useRef();
+    const audioRef = useRef();
+
+    const trackpubsToTracks = trackMap => Array.from(trackMap.values())
+        .map(publication => publication.track)
+        .filter(track => track !== null);
+
     useEffect(() => {
-        const el = ref.current;
-        createLocalVideoTrack().then(track => {
-            if (track) {
-                track.attach(el);
+        const trackSubscribed = track => {
+            if (track.kind === 'video') {
+                setVideoTracks(videoTracks => [...videoTracks, track]);
+            } else {
+                setAudioTracks(audioTracks => [...audioTracks, track]);
             }
-        });
-    });
+        };
+        const trackUnsubscribed = track => {
+            if (track.kind === 'video') {
+                setVideoTracks(videoTracks => videoTracks.filter(v => v !== track));
+            } else {
+                setAudioTracks(audioTracks => audioTracks.filter(a => a !== track));
+            }
+        };
+        setVideoTracks(trackpubsToTracks(participant.videoTracks));
+        setAudioTracks(trackpubsToTracks(participant.audioTracks));
 
-    return <div>
-        <div>Local</div>
-        <video ref={ref}></video>
-    </div>;
-}
+        participant.on('trackSubscribed', trackSubscribed);
+        participant.on('trackUnsubscribed', trackUnsubscribed);
 
-function RemoteMedia() {
-    return <div><div>Remote</div>
-        <div id="remote-media"></div></div>
-}
+        // cleanup
+        return () => {
+            setVideoTracks([]);
+            setAudioTracks([]);
+            participant.removeAllListeners();
+        };
+    }, [participant]);
+
+    useEffect(() => {
+        // TODO: for audio
+        const videoTrack = videoTracks[0];
+        if (videoTrack) {
+            videoTrack.attach(videoRef.current);
+            return () => {
+                videoTrack.detach();
+            };
+        }
+    }, [videoTracks]);
+
+    return (
+        <div className="participant">
+            <h3>{participant.identity}</h3>
+            <video ref={videoRef} autoPlay={true} width={200} />
+            <audio ref={audioRef} autoPlay={true} muted={true} />
+        </div>
+    );
+};
