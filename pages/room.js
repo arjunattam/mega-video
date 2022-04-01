@@ -38,10 +38,20 @@ export default function Index({ token, roomName, userName }) {
     return <div>Hello!</div>;
 }
 
-export async function getServerSideProps(ctx) {
-    const { roomName, userName } = ctx.query;
-    const response = await fetch(`http://localhost:3000/api/room?roomName=${roomName}&userName=${userName}`);
+export async function getServerSideProps({ query, req }) {
+    const { roomName, userName } = query;
+    const baseUrl = req ? `${reqProtocol(req)}://${req.headers.host}` : '';
+    const response = await fetch(`${baseUrl}/api/room?roomName=${roomName}&userName=${userName}`);
     const data = await response.json();
     const { token } = data;
     return { props: { token, roomName, userName } };
 }
+
+const reqProtocol = (req) => {
+    const host = req.headers.host;
+    if (host.includes("localhost")) return "http";
+    // if it is a Vercel deployment, this will probably be present and we can assume it is secure
+    if (req.headers["x-now-deployment-url"]) return "https";
+    // if Next.js is running on a custom server, like Express, req.protocol will probably be available
+    return req["protocol"] || "https";
+};
