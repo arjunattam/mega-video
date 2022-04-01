@@ -1,1 +1,10 @@
-This is a starter template for [Learn Next.js](https://nextjs.org/learn).
+# mega-video
+
+.env file 
+
+```
+TWILIO_ACCOUNT_SID_IN_TEST=bar
+TWILIO_ACCOUNT_SID=foo
+TWILIO_API_KEY_SID=bar
+TWILIO_API_KEY_SECRET=foo
+```
