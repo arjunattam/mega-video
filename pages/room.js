@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Participant } from '../components/Participant';
 import { reqProtocol } from '../utils';
 
-export default function Index({ token, roomName, userName }) {
+export default function Room({ token, roomName, userName }) {
     const [connectStatus, setConnectStatus] = useState('disconnected');
     const [room, setRoom] = useState(null);
     const [participants, setParticipants] = useState([]);
@@ -87,22 +87,6 @@ export default function Index({ token, roomName, userName }) {
 const connectToTwilio = (token, roomName) => {
     return connect(token, { name: roomName }).then(room => {
         console.log(`Successfully joined a Room: ${room}`);
-        room.on('participantConnected', participant => {
-            console.log(`A remote Participant connected: ${participant}`);
-        });
-
-        const localParticipant = room.localParticipant;
-        console.log(`Connected to the Room as LocalParticipant "${localParticipant.identity}"`);
-
-        // Log new Participants as they connect to the Room
-        room.on('participantConnected', participant => {
-            console.log(`Participant "${participant.identity}" has connected to the Room`);
-        });
-
-        // Log Participants as they disconnect from the Room
-        room.on('participantDisconnected', participant => {
-            console.log(`Participant "${participant.identity}" has disconnected from the Room`);
-        });
         return room;
     }, error => {
         console.log(error);
