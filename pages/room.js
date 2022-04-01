@@ -1,10 +1,12 @@
 //@ts-check
 const { connect } = require('twilio-video');
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Participant } from '../components/Participant';
+import { reqProtocol } from '../utils';
 
 export default function Index({ token, roomName, userName }) {
     const [connectStatus, setConnectStatus] = useState('disconnected');
-    const [room, setRoom] = useState(undefined);
+    const [room, setRoom] = useState(null);
     const [participants, setParticipants] = useState([]);
 
     const participantConnected = participant => {
@@ -21,7 +23,7 @@ export default function Index({ token, roomName, userName }) {
         const room = await connectToTwilio(token, roomName);
         if (room) {
             setRoom(room);
-            setConnectStatus('connected');
+            setConnectStatus(room.localParticipant.state);
             room.on('participantConnected', participantConnected);
             room.on('participantDisconnected', participantDisconnected);
             room.participants.forEach(participantConnected);
@@ -29,9 +31,19 @@ export default function Index({ token, roomName, userName }) {
     }
 
     const killConnection = () => {
-        room.disconnect();
-        setConnectStatus('disconnected');
+        if (room && room.localParticipant.state === 'connected') {
+            room.localParticipant.tracks.forEach(function (trackPublication) {
+                trackPublication.track.stop();
+            });
+            room.disconnect();
+            setRoom(null);
+            setConnectStatus('disconnected');
+        }
     }
+
+    useEffect(() => {
+        window.addEventListener("beforeunload", killConnection);
+    })
 
     let remoteVideoTrackPublications = [];
     if (room) {
@@ -100,78 +112,10 @@ const connectToTwilio = (token, roomName) => {
 
 export async function getServerSideProps({ query, req }) {
     const { roomName, userName } = query;
+    // TODO: error handling here
     const baseUrl = req ? `${reqProtocol(req)}://${req.headers.host}` : '';
-    const response = await fetch(`${baseUrl}/api/room?roomName=${roomName}&userName=${userName}`);
+    const response = await fetch(`${baseUrl}/api/twilio?roomName=${roomName}&userName=${userName}`);
     const data = await response.json();
     const { token } = data;
     return { props: { token, roomName, userName } };
 }
-
-const reqProtocol = (req) => {
-    const host = req.headers.host;
-    if (host.includes("localhost")) return "http";
-    // if it is a Vercel deployment, this will probably be present and we can assume it is secure
-    if (req.headers["x-now-deployment-url"]) return "https";
-    // if Next.js is running on a custom server, like Express, req.protocol will probably be available
-    return req["protocol"] || "https";
-};
-
-const Participant = ({ participant }) => {
-    const [videoTracks, setVideoTracks] = useState([]);
-    const [audioTracks, setAudioTracks] = useState([]);
-
-    const videoRef = useRef();
-    const audioRef = useRef();
-
-    const trackpubsToTracks = trackMap => Array.from(trackMap.values())
-        .map(publication => publication.track)
-        .filter(track => track !== null);
-
-    useEffect(() => {
-        const trackSubscribed = track => {
-            if (track.kind === 'video') {
-                setVideoTracks(videoTracks => [...videoTracks, track]);
-            } else {
-                setAudioTracks(audioTracks => [...audioTracks, track]);
-            }
-        };
-        const trackUnsubscribed = track => {
-            if (track.kind === 'video') {
-                setVideoTracks(videoTracks => videoTracks.filter(v => v !== track));
-            } else {
-                setAudioTracks(audioTracks => audioTracks.filter(a => a !== track));
-            }
-        };
-        setVideoTracks(trackpubsToTracks(participant.videoTracks));
-        setAudioTracks(trackpubsToTracks(participant.audioTracks));
-
-        participant.on('trackSubscribed', trackSubscribed);
-        participant.on('trackUnsubscribed', trackUnsubscribed);
-
-        // cleanup
-        return () => {
-            setVideoTracks([]);
-            setAudioTracks([]);
-            participant.removeAllListeners();
-        };
-    }, [participant]);
-
-    useEffect(() => {
-        // TODO: for audio
-        const videoTrack = videoTracks[0];
-        if (videoTrack) {
-            videoTrack.attach(videoRef.current);
-            return () => {
-                videoTrack.detach();
-            };
-        }
-    }, [videoTracks]);
-
-    return (
-        <div className="participant">
-            <h3>{participant.identity}</h3>
-            <video ref={videoRef} autoPlay={true} width={200} />
-            <audio ref={audioRef} autoPlay={true} muted={true} />
-        </div>
-    );
-};
